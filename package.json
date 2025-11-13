@@ -1,7 +1,7 @@
 {
   "name": "effect-decorate",
   "displayName": "effect-decorate",
-  "description": "Decorates code in with ligature-like symbols for effect-ts developers, enhancing readability without changing the text.",
+  "description": "Decorates Effect-s code with ligature-like symbols to improve readability.",
   "version": "0.0.1",
   "publisher": "dearhumandev",
   "engines": {
