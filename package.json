@@ -32,6 +32,7 @@
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "pnpm run check-types && pnpm run lint && node esbuild.js --production",
     "package:vsix": "pnpx @vscode/vsce package --no-dependencies",
+    "publish": "pnpx @vscode/vsce publish --no-dependencies",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "pnpm run compile-tests && pnpm run compile && pnpm run lint",

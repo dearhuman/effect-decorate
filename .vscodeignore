@@ -1,0 +1,12 @@
+.vscode/**
+.github/**
+src/**
+node_modules/**
+*.map
+*.vsix
+pnpm-lock.yaml
+tsconfig.json
+esbuild.js
+eslint.config.mjs
+prettier.config.*
+.gitignore
