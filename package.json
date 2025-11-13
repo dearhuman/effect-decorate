@@ -2,7 +2,7 @@
   "name": "effect-decorate",
   "displayName": "effect-decorate",
   "description": "Decorates Effect-s code with ligature-like symbols to improve readability.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "dearhumandev",
   "engines": {
     "vscode": "^1.105.0"
