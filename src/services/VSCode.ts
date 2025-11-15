@@ -64,7 +64,7 @@ const listen = <A, R>(
   callback: (data: A) => Effect.Effect<void, never, R>
 ): Effect.Effect<never, never, R> =>
   Effect.flatMap(Effect.runtime<R>(), (runtime) =>
-    Effect.async<never>(() => {
+    Effect.async(() => {
       const run = Runtime.runFork(runtime)
       const disposable = event((data) =>
         run(
@@ -86,3 +86,34 @@ export const listenFork = <A, R>(
   event: vscode.Event<A>,
   callback: (data: A) => Effect.Effect<void, never, R>
 ) => Effect.forkScoped(listen(event, callback))
+
+export const registerHoverProvider = <R>(
+  selector: vscode.DocumentSelector,
+  callback: (
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    token: vscode.CancellationToken
+  ) => Effect.Effect<vscode.Hover | null, never, R>
+): Effect.Effect<void, never, R | VSCodeContext> =>
+  Effect.gen(function* () {
+    const context = yield* VSCodeContext
+    const runtime = yield* Effect.runtime<R>()
+
+    const run = Runtime.runPromise(runtime)
+
+    const disposable = vscode.languages.registerHoverProvider(
+      selector,
+      {
+        provideHover(document, position, token) {
+          return run(
+            callback(document, position, token).pipe(
+              Effect.catchAllCause((cause) =>
+                Effect.logWarning(cause).pipe(Effect.as(null))
+              )
+            )
+          )
+        },
+      }
+    )
+    context.subscriptions.push(disposable)
+  })

@@ -1,5 +1,3 @@
-
-
 import { Effect, Ref } from 'effect'
 
 declare const someProgram: Effect.Effect<void>
@@ -25,5 +23,3 @@ const program: Effect.Effect<void> = Effect.gen(function* () {
 
   const notYieldedRef = Ref.make('someRef')
 })
-
-
