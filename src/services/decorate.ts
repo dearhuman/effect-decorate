@@ -10,7 +10,7 @@ import {
 } from 'effect'
 import * as vscode from 'vscode'
 import { ExtensionConfiguration, getExtensionConfiguration } from './extension'
-import { listenFork } from './VSCode'
+import { listenFork, registerHoverProvider, VSCodeContext } from './VSCode'
 
 const fromBoolean: (bool: boolean) => <A>(a: A) => Option.Option<A> =
   (bool) => (a) => (bool ? Option.some(a) : Option.none())
@@ -239,323 +239,370 @@ const getDecorations = (config: ExtensionConfiguration): DecorationTypes => {
 /**
  * Core part of the extension.
  */
-export const Decorate: Layer.Layer<never, never, never> = Layer.scopedDiscard(
-  Effect.gen(function* () {
-    // setup a reactive ref we can subscribe to
-    const configRef: SubscriptionRef.SubscriptionRef<ExtensionConfiguration> =
-      yield* getExtensionConfiguration.pipe(
-        Effect.andThen(SubscriptionRef.make)
+export const Decorate: Layer.Layer<never, never, VSCodeContext> =
+  Layer.scopedDiscard(
+    Effect.gen(function* () {
+      // setup a reactive ref we can subscribe to
+      const configRef: SubscriptionRef.SubscriptionRef<ExtensionConfiguration> =
+        yield* getExtensionConfiguration.pipe(
+          Effect.andThen(SubscriptionRef.make)
+        )
+
+      // listen to configuration changes and update the config ref
+      yield* listenFork(vscode.workspace.onDidChangeConfiguration, () =>
+        getExtensionConfiguration.pipe(
+          Effect.andThen((config) => SubscriptionRef.set(configRef, config))
+        )
       )
 
-    // listen to configuration changes and update the config ref
-    yield* listenFork(vscode.workspace.onDidChangeConfiguration, () =>
-      getExtensionConfiguration.pipe(
-        Effect.andThen((config) => SubscriptionRef.set(configRef, config))
+      /**
+       * Tracks the decoration types.
+       * These can change when the user changes the extension configuration.
+       */
+      const decorationTypes = yield* pipe(
+        configRef.get,
+        Effect.andThen(getDecorations),
+        Effect.andThen(Ref.make)
       )
-    )
 
-    /**
-     * Tracks the decoration types.
-     * These can change when the user changes the extension configuration.
-     */
-    const decorationTypes = yield* pipe(
-      configRef.get,
-      Effect.andThen(getDecorations),
-      Effect.andThen(Ref.make)
-    )
+      // In order to avoid duplicate work we cache as many calculations
+      // as possible. Those include the positions of the current comments and
+      // the positions of the current decorations.
 
-    // In order to avoid duplicate work we cache as many calculations
-    // as possible. Those include the positions of the current comments and
-    // the positions of the current decorations.
+      /**
+       * Type alias for a string representing the uri of a file
+       */
+      type Uri = string
 
-    /**
-     * Type alias for a string representing the uri of a file
-     */
-    type Uri = string
+      /**
+       * Caches the comments positions for every editor.
+       */
+      const commentsCache = yield* Ref.make<
+        Map<Uri, { version: number; ranges: vscode.Range[] }>
+      >(new Map())
 
-    /**
-     * Caches the comments positions for every editor.
-     */
-    const commentsCache = yield* Ref.make<
-      Map<Uri, { version: number; ranges: vscode.Range[] }>
-    >(new Map())
+      /**
+       * Caches the `Namespace.Namespace` pattern positions for every editor.
+       */
+      const namespacesCache = yield* Ref.make<
+        Map<
+          Uri,
+          { version: number; namespaces: vscode.Range[]; types: vscode.Range[] }
+        >
+      >(new Map())
 
-    /**
-     * Caches the `Namespace.Namespace` pattern positions for every editor.
-     */
-    const namespacesCache = yield* Ref.make<
-      Map<
-        Uri,
-        { version: number; namespaces: vscode.Range[]; types: vscode.Range[] }
-      >
-    >(new Map())
+      /**
+       * Caches the `yield* foo` pattern positions for every editor.
+       */
+      const yieldsCache = yield* Ref.make<
+        Map<
+          string,
+          {
+            version: number
+            yields: vscode.Range[]
+            yieldables: vscode.Range[]
+          }
+        >
+      >(new Map())
 
-    /**
-     * Caches the `yield* foo` pattern positions for every editor.
-     */
-    const yieldsCache = yield* Ref.make<
-      Map<
-        string,
-        {
-          version: number
-          yields: vscode.Range[]
-          yieldables: vscode.Range[]
-        }
-      >
-    >(new Map())
+      // NOTE: all functions take text along the editor for performance reasons
+      // editor exposes APIs to get the positions in the document
+      // but we compute the text only once
 
-    // NOTE: all functions take text along the editor for performance reasons
-    // editor exposes APIs to get the positions in the document
-    // but we compute the text only once
+      /**
+       * Returns all the comments in a text editor.
+       * Returns cached results if the file hasn't changed.
+       */
+      const getComments = (editor: vscode.TextEditor, text: string) =>
+        Effect.gen(function* () {
+          const cache = yield* commentsCache
+          const uri = editor.document.uri.path
+          const version = editor.document.version
 
-    /**
-     * Returns all the comments in a text editor.
-     * Returns cached results if the file hasn't changed.
-     */
-    const getComments = (editor: vscode.TextEditor, text: string) =>
-      Effect.gen(function* () {
-        const cache = yield* commentsCache
-        const uri = editor.document.uri.path
-        const version = editor.document.version
-
-        const cached = cache.get(uri)
-        if (cached && cached.version === version) {
-          return cached.ranges
-        }
-
-        const ranges = getCommentRanges(editor.document, text)
-
-        yield* Ref.update(commentsCache, (map) =>
-          new Map(map).set(uri, { version, ranges })
-        )
-        return ranges
-      })
-
-    /**
-     * Returns all the `yield* foo` patterns in a text editor.
-     * Returns cached results if the file hasn't changed.
-     */
-    const getYields = (
-      editor: vscode.TextEditor,
-      text: string,
-      selections: readonly vscode.Selection[]
-    ) =>
-      Effect.gen(function* () {
-        const cache = yield* yieldsCache
-        const uri = editor.document.uri.path
-        const version = editor.document.version
-
-        const cached = cache.get(uri)
-
-        const comments = yield* getComments(editor, text)
-
-        const ranges =
-          cached && cached.version === version
-            ? { yields: cached.yields, yieldables: cached.yieldables }
-            : getYieldRanges({
-                document: editor.document,
-                text,
-                commentRanges: comments,
-              })
-
-        yield* Ref.update(yieldsCache, (map) =>
-          new Map(map).set(uri, {
-            version,
-            yields: ranges.yields,
-            yieldables: ranges.yieldables,
-          })
-        )
-        const yields: vscode.Range[] = []
-        const yieldables: vscode.Range[] = []
-
-        for (let i = 0; i < ranges.yields.length; i++) {
-          const _yield = ranges.yields[i]
-          const _yieldable = ranges.yieldables[i]
-
-          if (!_yield || !_yieldable) {
-            continue
+          const cached = cache.get(uri)
+          if (cached && cached.version === version) {
+            return cached.ranges
           }
 
-          // if our symbols intersect selections, we don't decorate them
-          const shouldSkip =
-            areRangesIntersecting(_yieldable, selections) ||
-            areRangesIntersecting(_yield, selections)
+          const ranges = getCommentRanges(editor.document, text)
 
-          if (!shouldSkip) {
-            yields.push(_yield)
-            yieldables.push(_yieldable)
-          }
-        }
-
-        return { yields, yieldables }
-      })
-
-    const getNamespaces = (
-      editor: vscode.TextEditor,
-      text: string,
-      selections: readonly vscode.Selection[]
-    ) =>
-      Effect.gen(function* () {
-        const cache = yield* namespacesCache
-        const uri = editor.document.uri.path
-        const version = editor.document.version
-
-        const cached = cache.get(uri)
-
-        const comments = yield* getComments(editor, text)
-
-        const ranges =
-          cached && cached.version === version
-            ? { namespaces: cached.namespaces, types: cached.types }
-            : getNamespaceRanges({
-                document: editor.document,
-                text,
-                commentRanges: comments,
-              })
-
-        yield* Ref.update(namespacesCache, (map) =>
-          new Map(map).set(uri, {
-            version,
-            namespaces: ranges.namespaces,
-            types: ranges.types,
-          })
-        )
-
-        const namespaces: vscode.Range[] = []
-        const types: vscode.Range[] = []
-
-        for (let i = 0; i < ranges.namespaces.length; i++) {
-          const namespace = ranges.namespaces[i]
-          const type = ranges.types[i]
-
-          if (!namespace || !type) {
-            continue
-          }
-
-          const shouldSkip =
-            areRangesIntersecting(namespace, selections) ||
-            areRangesIntersecting(type, selections)
-
-          if (!shouldSkip) {
-            namespaces.push(namespace)
-            types.push(type)
-          }
-        }
-
-        return { namespaces, types }
-      })
-
-    const cleanDecorations = (editor: vscode.TextEditor) =>
-      Effect.gen(function* () {
-        const decorations = yield* decorationTypes
-        if (Option.isSome(decorations.namespaceDecoration)) {
-          editor.setDecorations(decorations.namespaceDecoration.value, [])
-        }
-        if (Option.isSome(decorations.yieldableDecoration)) {
-          editor.setDecorations(decorations.yieldableDecoration.value, [])
-        }
-        if (Option.isSome(decorations.namespaceDecoration)) {
-          editor.setDecorations(decorations.namespaceDecoration.value, [])
-        }
-      })
-
-    const decorateCounter = Metric.counter('decorate_count', {
-      description: 'Counts how many times `decorate` has run',
-      incremental: true,
-    })
-
-    const decorate = Effect.gen(function* () {
-      const config = yield* configRef
-
-      // nothing to decorate if the decorations aren't activated via config
-      if (!config.areDecorationsActive) {
-        return
-      }
-
-      const textEditors = getEditors()
-
-      // nothing to decorate if there's no suitable text editors
-      if (textEditors.length === 0) {
-        return
-      }
-
-      // Track how many times are we decorating for performance tuning
-      const count = yield* Metric.value(decorateCounter)
-      yield* decorateCounter(Effect.succeed(1))
-
-      const { yieldDecoration, yieldableDecoration, namespaceDecoration } =
-        yield* decorationTypes
-
-      for (const editor of textEditors) {
-        // TODO: This can likely be improved and avoided
-        // We shouldn't always clean all in order to redecorate
-        yield* cleanDecorations(editor)
-        const selections = editor.selections
-
-        const text = editor.document.getText()
-
-        const yields = yield* getYields(editor, text, selections)
-
-        const namespaces = yield* getNamespaces(editor, text, selections)
-
-        if (Option.isSome(yieldDecoration)) {
-          editor.setDecorations(yieldDecoration.value, yields.yields)
-        }
-        if (Option.isSome(yieldableDecoration)) {
-          editor.setDecorations(yieldableDecoration.value, yields.yieldables)
-        }
-        if (Option.isSome(namespaceDecoration)) {
-          editor.setDecorations(
-            namespaceDecoration.value,
-            namespaces.namespaces
+          yield* Ref.update(commentsCache, (map) =>
+            new Map(map).set(uri, { version, ranges })
           )
+          return ranges
+        })
+
+      /**
+       * Returns all the `yield* foo` patterns in a text editor.
+       * Returns cached results if the file hasn't changed.
+       */
+      const getYields = (
+        editor: vscode.TextEditor,
+        text: string,
+        selections: readonly vscode.Selection[]
+      ) =>
+        Effect.gen(function* () {
+          const cache = yield* yieldsCache
+          const uri = editor.document.uri.path
+          const version = editor.document.version
+
+          const cached = cache.get(uri)
+
+          const comments = yield* getComments(editor, text)
+
+          const ranges =
+            cached && cached.version === version
+              ? { yields: cached.yields, yieldables: cached.yieldables }
+              : getYieldRanges({
+                  document: editor.document,
+                  text,
+                  commentRanges: comments,
+                })
+
+          yield* Ref.update(yieldsCache, (map) =>
+            new Map(map).set(uri, {
+              version,
+              yields: ranges.yields,
+              yieldables: ranges.yieldables,
+            })
+          )
+          const yields: vscode.Range[] = []
+          const yieldables: vscode.Range[] = []
+
+          for (let i = 0; i < ranges.yields.length; i++) {
+            const _yield = ranges.yields[i]
+            const _yieldable = ranges.yieldables[i]
+
+            if (!_yield || !_yieldable) {
+              continue
+            }
+
+            // if our symbols intersect selections, we don't decorate them
+            const shouldSkip =
+              areRangesIntersecting(_yieldable, selections) ||
+              areRangesIntersecting(_yield, selections)
+
+            if (!shouldSkip) {
+              yields.push(_yield)
+              yieldables.push(_yieldable)
+            }
+          }
+
+          return { yields, yieldables }
+        })
+
+      const getNamespaces = (
+        editor: vscode.TextEditor,
+        text: string,
+        selections: readonly vscode.Selection[]
+      ) =>
+        Effect.gen(function* () {
+          const cache = yield* namespacesCache
+          const uri = editor.document.uri.path
+          const version = editor.document.version
+
+          const cached = cache.get(uri)
+
+          const comments = yield* getComments(editor, text)
+
+          const ranges =
+            cached && cached.version === version
+              ? { namespaces: cached.namespaces, types: cached.types }
+              : getNamespaceRanges({
+                  document: editor.document,
+                  text,
+                  commentRanges: comments,
+                })
+
+          yield* Ref.update(namespacesCache, (map) =>
+            new Map(map).set(uri, {
+              version,
+              namespaces: ranges.namespaces,
+              types: ranges.types,
+            })
+          )
+
+          const namespaces: vscode.Range[] = []
+          const types: vscode.Range[] = []
+
+          for (let i = 0; i < ranges.namespaces.length; i++) {
+            const namespace = ranges.namespaces[i]
+            const type = ranges.types[i]
+
+            if (!namespace || !type) {
+              continue
+            }
+
+            const shouldSkip =
+              areRangesIntersecting(namespace, selections) ||
+              areRangesIntersecting(type, selections)
+
+            if (!shouldSkip) {
+              namespaces.push(namespace)
+              types.push(type)
+            }
+          }
+
+          return { namespaces, types }
+        })
+
+      const cleanDecorations = (editor: vscode.TextEditor) =>
+        Effect.gen(function* () {
+          const decorations = yield* decorationTypes
+          if (Option.isSome(decorations.namespaceDecoration)) {
+            editor.setDecorations(decorations.namespaceDecoration.value, [])
+          }
+          if (Option.isSome(decorations.yieldableDecoration)) {
+            editor.setDecorations(decorations.yieldableDecoration.value, [])
+          }
+          if (Option.isSome(decorations.namespaceDecoration)) {
+            editor.setDecorations(decorations.namespaceDecoration.value, [])
+          }
+        })
+
+      const decorateCounter = Metric.counter('decorate_count', {
+        description: 'Counts how many times `decorate` has run',
+        incremental: true,
+      })
+
+      const decorate = Effect.gen(function* () {
+        const config = yield* configRef
+
+        // nothing to decorate if the decorations aren't activated via config
+        if (!config.areDecorationsActive) {
+          return
         }
-      }
-      yield* Effect.logTrace(`count: ${count.count})`)
-    }).pipe(Effect.withLogSpan('decorate'))
 
-    /**
-     * Reactively sync the config with the decoration types.
-     * If the user changes decoration settings, we update the decorationTypes ref.
-     * Then we update the decorations by triggering `decorate`,
-     * which will use the updated decoration types.
-     */
-    yield* Effect.forkScoped(
-      configRef.changes.pipe(
-        Stream.runForEach((newConfig) =>
-          Effect.gen(function* () {
-            const old = yield* Ref.get(decorationTypes)
+        const textEditors = getEditors()
 
-            if (Option.isSome(old.yieldDecoration)) {
-              old.yieldDecoration.value.dispose()
-            }
+        // nothing to decorate if there's no suitable text editors
+        if (textEditors.length === 0) {
+          return
+        }
 
-            if (Option.isSome(old.yieldableDecoration)) {
-              old.yieldableDecoration.value.dispose()
-            }
+        // Track how many times are we decorating for performance tuning
+        const count = yield* Metric.value(decorateCounter)
+        yield* decorateCounter(Effect.succeed(1))
 
-            if (Option.isSome(old.namespaceDecoration)) {
-              old.namespaceDecoration.value.dispose()
-            }
+        const { yieldDecoration, yieldableDecoration, namespaceDecoration } =
+          yield* decorationTypes
 
-            yield* Ref.set(decorationTypes, getDecorations(newConfig))
+        for (const editor of textEditors) {
+          // TODO: This can likely be improved and avoided
+          // We shouldn't always clean all in order to redecorate
+          yield* cleanDecorations(editor)
+          const selections = editor.selections
 
-            yield* decorate.pipe(
-              Effect.annotateLogs({ trigger: 'configChange' })
+          const text = editor.document.getText()
+
+          const yields = yield* getYields(editor, text, selections)
+
+          const namespaces = yield* getNamespaces(editor, text, selections)
+
+          if (Option.isSome(yieldDecoration)) {
+            editor.setDecorations(yieldDecoration.value, yields.yields)
+          }
+          if (Option.isSome(yieldableDecoration)) {
+            editor.setDecorations(yieldableDecoration.value, yields.yieldables)
+          }
+          if (Option.isSome(namespaceDecoration)) {
+            editor.setDecorations(
+              namespaceDecoration.value,
+              namespaces.namespaces
             )
-          })
+          }
+        }
+        yield* Effect.logTrace(`count: ${count.count})`)
+      }).pipe(Effect.withLogSpan('decorate'))
+
+      /**
+       * Reactively sync the config with the decoration types.
+       * If the user changes decoration settings, we update the decorationTypes ref.
+       * Then we update the decorations by triggering `decorate`,
+       * which will use the updated decoration types.
+       */
+      yield* Effect.forkScoped(
+        configRef.changes.pipe(
+          Stream.runForEach((newConfig) =>
+            Effect.gen(function* () {
+              const old = yield* Ref.get(decorationTypes)
+
+              if (Option.isSome(old.yieldDecoration)) {
+                old.yieldDecoration.value.dispose()
+              }
+
+              if (Option.isSome(old.yieldableDecoration)) {
+                old.yieldableDecoration.value.dispose()
+              }
+
+              if (Option.isSome(old.namespaceDecoration)) {
+                old.namespaceDecoration.value.dispose()
+              }
+
+              yield* Ref.set(decorationTypes, getDecorations(newConfig))
+
+              yield* decorate.pipe(
+                Effect.annotateLogs({ trigger: 'configChange' })
+              )
+            })
+          )
         )
       )
-    )
 
-    // Last step: listen to selection changes
-    yield* listenFork(vscode.window.onDidChangeTextEditorSelection, (event) =>
-      event.textEditor.document.languageId === 'typescript'
-        ? decorate.pipe(Effect.annotateLogs({ trigger: 'selectionChange' }))
-        : Effect.void
-    )
+      // Last step: listen to selection changes
+      yield* listenFork(
+        vscode.window.onDidChangeTextEditorSelection,
+        (event) =>
+          event.textEditor.document.languageId === 'typescript'
+            ? decorate.pipe(Effect.annotateLogs({ trigger: 'selectionChange' }))
+            : Effect.void
+      )
 
-    // and trigger the first decoration at startup
-    yield* decorate
-  })
-)
+      // and trigger the first decoration at startup
+      yield* decorate
+      yield* Effect.logInfo('Finished initial decoration')
+
+      // Register hover provider for namespace collapsing
+      yield* Effect.logInfo('About to register hover provider')
+      yield* registerHoverProvider(
+        ['typescript', 'typescriptreact'],
+        (document, position) =>
+          Effect.gen(function* () {
+            yield* Effect.logInfo('Hover provider called')
+
+            const hovers = yield* Effect.tryPromise(() =>
+              vscode.commands.executeCommand<vscode.Hover[]>(
+                'vscode.executeHoverProvider',
+                document.uri,
+                position
+              )
+            )
+
+            yield* Effect.logInfo(`Got ${hovers?.length ?? 0} hovers`)
+
+            if (!hovers || hovers.length === 0) {
+              return null
+            }
+
+            const original = hovers[0]
+            if (!original) {
+              return null
+            }
+
+            const newContents = original.contents.map((content) => {
+              if (typeof content === 'string') {
+                return content.replace(/\b(\w+)\.(\1)\b/g, '$1')
+              }
+              if (content instanceof vscode.MarkdownString) {
+                return new vscode.MarkdownString(
+                  content.value.replace(/\b(\w+)\.(\1)\b/g, '$1')
+                )
+              }
+              return content
+            })
+
+            return new vscode.Hover(newContents, original.range)
+          }).pipe(Effect.orElseSucceed(() => null))
+      )
+    })
+  )
