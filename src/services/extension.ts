@@ -9,6 +9,7 @@ export type ExtensionConfiguration = {
   yieldableColor: 'none' | 'default' | 'custom'
   yieldableCustomColor: string
   yieldableTextDecoration: 'none' | 'underline'
+  yieldStyling: 'hide' | 'thunder' | 'none'
 }
 
 const decodeWithDefault = <A>(
@@ -78,6 +79,11 @@ export const getExtensionConfiguration: Effect.Effect<ExtensionConfiguration> =
       Schema.Literal('none', 'underline'),
       'underline'
     )
+    const yieldStyling = yield* getValue(
+      'yieldStyling',
+      Schema.Literal('hide', 'thunder', 'none'),
+      'hide'
+    )
 
     return {
       areDecorationsActive,
@@ -87,5 +93,6 @@ export const getExtensionConfiguration: Effect.Effect<ExtensionConfiguration> =
       yieldableColor,
       yieldableCustomColor,
       yieldableTextDecoration,
+      yieldStyling,
     }
   })

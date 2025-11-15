@@ -76,6 +76,21 @@
             "none"
           ]
         },
+        "effect-decorate.extension.yieldStyling": {
+          "type": "string",
+          "markdownDescription": "Changes how `yield*` is displayed in `yield* foo`.",
+          "default": "hide",
+          "enum": [
+            "hide",
+            "thunder",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Hides the `yield*` keyword",
+            "Replaces `yield*` with a thunder symbol (⚡)",
+            "Shows the original `yield*` keyword"
+          ]
+        },
         "effect-decorate.extension.isDebugActive": {
           "type": "boolean",
           "default": false,

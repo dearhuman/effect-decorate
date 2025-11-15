@@ -174,9 +174,26 @@ const hideDecoration: vscode.DecorationRenderOptions = {
 }
 
 const getDecorations = (config: ExtensionConfiguration): DecorationTypes => {
-  const yieldDecoration = fromBoolean(config.isYieldDecorationActive)(
-    createDecoration(hideDecoration)
-  )
+  const getYieldDecoration = () => {
+    if (!config.isYieldDecorationActive || config.yieldStyling === 'none') {
+      return Option.none()
+    }
+    if (config.yieldStyling === 'hide') {
+      return Option.some(createDecoration(hideDecoration))
+    }
+    // thunder
+    return Option.some(
+      createDecoration({
+        before: {
+          contentText: '⚡',
+        },
+        opacity: '0',
+        letterSpacing: '-0.6em',
+      })
+    )
+  }
+
+  const yieldDecoration = getYieldDecoration()
 
   const getYieldableDecoration = () => {
     if (!config.isYieldDecorationActive) {
