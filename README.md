@@ -54,7 +54,7 @@ Huge thanks to [Tim Smart](https://github.com/tim-smart) and [Mattia Manzati](ht
 
 First release.
 
-### 0.1.4
+### 0.2.0
 
 - Add customizeable settings panel.
 - Merge yield and yieldable setting in one. It does not make sense to hide the `yield*` part without emphasizing the yieldable.
