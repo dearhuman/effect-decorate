@@ -4,9 +4,7 @@ import * as vscode from 'vscode'
 export type ExtensionConfiguration = {
   areDecorationsActive: boolean
   isDebugActive: boolean
-  isTraceActive: boolean
   isNamespaceDecorationActive: boolean
-  isYieldableDecorationActive: boolean
   isYieldDecorationActive: boolean
   yieldableColor: 'none' | 'default' | 'custom'
   yieldableCustomColor: string
@@ -55,14 +53,8 @@ export const getExtensionConfiguration: Effect.Effect<ExtensionConfiguration> =
     )
 
     const isDebugActive = yield* getValue('isDebugActive', Schema.Boolean, true)
-    const isTraceActive = yield* getValue('isTraceActive', Schema.Boolean, true)
     const isNamespaceDecorationActive = yield* getValue(
       'isNamespaceDecorationActive',
-      Schema.Boolean,
-      true
-    )
-    const isYieldableDecorationActive = yield* getValue(
-      'isYieldableDecorationActive',
       Schema.Boolean,
       true
     )
@@ -90,9 +82,7 @@ export const getExtensionConfiguration: Effect.Effect<ExtensionConfiguration> =
     return {
       areDecorationsActive,
       isDebugActive,
-      isTraceActive,
       isNamespaceDecorationActive,
-      isYieldableDecorationActive,
       isYieldDecorationActive,
       yieldableColor,
       yieldableCustomColor,

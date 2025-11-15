@@ -23,11 +23,7 @@ export const logger = (name: string) =>
         const config = getUnsafeLoggingConfiguration()
 
         const shouldLog =
-          options.logLevel === LogLevel.Trace
-            ? config.isTraceActive
-            : options.logLevel === LogLevel.Debug
-              ? config.isDebugActive
-              : true
+          options.logLevel === LogLevel.Debug ? config.isDebugActive : true
 
         if (!shouldLog) {
           return

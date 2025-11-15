@@ -12,6 +12,9 @@ import * as vscode from 'vscode'
 import { ExtensionConfiguration, getExtensionConfiguration } from './extension'
 import { listenFork } from './VSCode'
 
+const fromBoolean: (bool: boolean) => <A>(a: A) => Option.Option<A> =
+  (bool) => (a) => (bool ? Option.some(a) : Option.none())
+
 /**
  * Returns the editors that are relevant for decoration purposes.
  */
@@ -171,12 +174,12 @@ const hideDecoration: vscode.DecorationRenderOptions = {
 }
 
 const getDecorations = (config: ExtensionConfiguration): DecorationTypes => {
-  const yieldDecoration = config.isYieldDecorationActive
-    ? Option.some(createDecoration(hideDecoration))
-    : Option.none()
+  const yieldDecoration = fromBoolean(config.isYieldDecorationActive)(
+    createDecoration(hideDecoration)
+  )
 
   const getYieldableDecoration = () => {
-    if (!config.isYieldableDecorationActive) {
+    if (!config.isYieldDecorationActive) {
       return Option.none()
     } else {
       const hasColor = config.yieldableColor !== 'none'
@@ -205,9 +208,9 @@ const getDecorations = (config: ExtensionConfiguration): DecorationTypes => {
 
   const yieldableDecoration = getYieldableDecoration()
 
-  const namespaceDecoration = config.isNamespaceDecorationActive
-    ? Option.some(createDecoration(hideDecoration))
-    : Option.none()
+  const namespaceDecoration = fromBoolean(config.isNamespaceDecorationActive)(
+    createDecoration(hideDecoration)
+  )
 
   return {
     yieldableDecoration,

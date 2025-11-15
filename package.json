@@ -23,7 +23,66 @@
         "command": "effect-decorate.openSettings",
         "title": "Effect Decorate: Open Settings"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Effect Decorate",
+      "type": "object",
+      "properties": {
+        "effect-decorate.extension.areDecorationsActive": {
+          "type": "boolean",
+          "description": "Toggles all the decorations on/off",
+          "markdownDescription": "Toggles all the decorations on/off",
+          "default": true
+        },
+        "effect-decorate.extension.isYieldDecorationActive": {
+          "type": "boolean",
+          "description": "Toggles `yield* yieldable` decoration on/off",
+          "markdownDescription": "Toggles `yield* yieldable` decoration on/off",
+          "default": true
+        },
+        "effect-decorate.extension.isNamespaceDecorationActive": {
+          "type": "boolean",
+          "description": "Toggles `Namespace.Namespace` collapsing decoration on/off",
+          "markdownDescription": "Toggles `Namespace.Namespace` collapsing decoration on/off",
+          "default": true
+        },
+        "effect-decorate.extension.yieldableColor": {
+          "type": "string",
+          "enum": [
+            "default",
+            "none",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Uses the theme's foreground color",
+            "Uses the theme's standard color for the token",
+            "Uses the color specified in Yieldable Custom Color"
+          ],
+          "markdownDescription": "Changes the color of `foo` in `yield* foo`",
+          "default": "default"
+        },
+        "effect-decorate.extension.yieldableCustomColor": {
+          "type": "string",
+          "default": "#FFFFFF",
+          "markdownDescription": "Sets the custom color for the yieldable `foo` in `yield* foo`.\nActive only if \"Custom\" is chosen in Yieldable Color.",
+          "description": "Sets the custom color for the yieldable `foo` in `yield* foo`.\nActive only if \"Custom\" is chosen in Yieldable Color."
+        },
+        "effect-decorate.extension.yieldableTextDecoration": {
+          "type": "string",
+          "markdownDescription": "Changes decorations for the yieldable `foo` in `yield* foo`.",
+          "default": "underline",
+          "enum": [
+            "underline",
+            "none"
+          ]
+        },
+        "effect-decorate.extension.isDebugActive": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Activates debugging information in the `effect-decorate` output channel.\nUse it when encountering bugs, include it in the GitHub issue."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
