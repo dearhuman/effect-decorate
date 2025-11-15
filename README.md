@@ -31,6 +31,8 @@ Improves the readability of `yield* Foo` by hiding the `yield*` part and emphasi
 ### Customizable
 
 The decorations can be enabled/disabled one by one in the panel settings. Use only what you want!
+You can also apply your own styling to the yieldables.
+
 
 ## Roadmap
 
@@ -59,3 +61,11 @@ First release.
 - Add customizeable settings panel.
 - Merge yield and yieldable setting in one. It does not make sense to hide the `yield*` part without emphasizing the yieldable.
 - Improve documentation with images.
+
+### 0.2.1
+
+- Fix docs copy.
+
+### 0.2.2
+
+Specify you can style the yieldable part.
